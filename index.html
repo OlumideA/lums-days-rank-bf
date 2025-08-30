@@ -11,43 +11,60 @@
   </style>
 </head>
 <body>
-  <h2>7-Day Price Change — Bybit Futures</h2>
+  <h2>7-Day Price Change - Bybit Futures</h2>
   <button id="loadBtn">Load & Calculate</button>
   <table id="resultsTable"></table>
 
   <script>
     const SHEET_ID = "1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw";
-    const API_KEY = ""; // not needed for public sheets
     const SHEET_RANGE = "A:A"; // only column A
 
+    // Fetch symbols from Google Sheets (CSV export)
     async function fetchSymbolsFromSheet() {
-      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Sheet1&range=${SHEET_RANGE}`;
-      const res = await fetch(url);
-      const text = await res.text();
-      const json = JSON.parse(text.substr(47).slice(0, -2)); // strip Google JSON wrapper
-      const symbols = json.table.rows.map(r => r.c[0]?.v).filter(Boolean);
-      return symbols;
+      try {
+        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Sheet1&range=${SHEET_RANGE}`;
+        const res = await fetch(url);
+        const text = await res.text();
+        const symbols = text
+          .split("\n")
+          .map(r => r.trim())
+          .filter(Boolean);
+        console.log("Symbols loaded:", symbols);
+        return symbols;
+      } catch (err) {
+        console.error("Error fetching sheet:", err);
+        return [];
+      }
     }
 
+    // Fetch 7-day price change for a symbol
     async function fetchPrice(symbol) {
-      const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=D&limit=7`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.result || !data.result.list || data.result.list.length < 2) return null;
+      try {
+        const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=D&limit=7`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.result || !data.result.list || data.result.list.length < 2) return null;
 
-      const candles = data.result.list.reverse(); // oldest → newest
-      const oldPrice = parseFloat(candles[0][4]); // close 7 days ago
-      const newPrice = parseFloat(candles[candles.length - 1][4]); // latest close
-      const change = ((newPrice - oldPrice) / oldPrice * 100).toFixed(2);
+        const candles = data.result.list.reverse(); // oldest → newest
+        const oldPrice = parseFloat(candles[0][4]);
+        const newPrice = parseFloat(candles[candles.length - 1][4]);
+        const change = ((newPrice - oldPrice) / oldPrice * 100).toFixed(2);
 
-      return { symbol, current: newPrice, change7d: change };
+        return { symbol, current: newPrice, change7d: parseFloat(change) };
+      } catch (err) {
+        console.warn(`Failed to fetch ${symbol}:`, err);
+        return null;
+      }
     }
 
+    // Load data and render table
     async function loadData() {
-      document.getElementById("resultsTable").innerHTML = "<tr><td>Loading...</td></tr>";
-      const symbols = await fetchSymbolsFromSheet();
+      const table = document.getElementById("resultsTable");
+      table.innerHTML = "<tr><td>Loading...</td></tr>";
 
+      const symbols = await fetchSymbolsFromSheet();
       const results = [];
+
       for (const sym of symbols) {
         const row = await fetchPrice(sym);
         if (row) results.push(row);
@@ -74,7 +91,7 @@
           </tr>`;
       });
 
-      document.getElementById("resultsTable").innerHTML = html;
+      table.innerHTML = html;
     }
 
     document.getElementById("loadBtn").addEventListener("click", loadData);
