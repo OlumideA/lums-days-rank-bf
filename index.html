@@ -13,14 +13,20 @@
     const priceCache = {};
     const DAYS = 7;
 
-    // Your Google Sheet CSV link
+    // Google Sheet CSV link
     const SHEET_URL = "https://docs.google.com/spreadsheets/d/1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw/gviz/tq?tqx=out:csv&gid=0";
 
     async function fetchTickersFromSheet() {
       const res = await fetch(SHEET_URL);
       const text = await res.text();
       const lines = text.trim().split("\n");
-      return lines.map(line => line.replace(/"/g, "").trim()); // remove quotes
+
+      // skip header row and clean up
+      return lines.slice(1).map(line => {
+        const cols = line.split(",");
+        const raw = cols[0].replace(/"/g, "").trim(); // e.g. tickers.ETHUSDT
+        return raw.replace("tickers.", ""); // → ETHUSDT
+      });
     }
 
     function connectWebSocket(tickers) {
@@ -28,7 +34,7 @@
 
       ws.onopen = () => {
         console.log("WebSocket connected ✅");
-        // Subscribe to tickers from sheet
+        // Subscribe to tickers
         const args = tickers.map(sym => `tickers.${sym}`);
         console.log("Subscribing:", args);
         ws.send(JSON.stringify({ op: "subscribe", args }));
@@ -76,12 +82,16 @@
         }
       }
 
+      // sort by change descending
+      out.sort((a, b) => parseFloat(b.change7d) - parseFloat(a.change7d));
+
       document.getElementById("output").textContent =
-        JSON.stringify(out.slice(0, 20), null, 2); // show first 20
+        JSON.stringify(out.slice(0, 20), null, 2); // show top 20
     }
 
     document.getElementById("load").onclick = async () => {
       const tickers = await fetchTickersFromSheet();
+      console.log("Tickers from sheet:", tickers);
       connectWebSocket(tickers);
     };
   </script>
