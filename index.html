@@ -2,34 +2,41 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Bybit 7-Day Price Change (WebSocket)</title>
+  <title>Bybit 7-Day Change from Google Sheet</title>
 </head>
 <body>
-  <h1>7-Day Price Change — Bybit Futures & Perpetuals (Live)</h1>
+  <h1>7-Day Price Change — Bybit Futures (from Google Sheet)</h1>
   <button id="load">Start Streaming</button>
-  <pre id="output">Click the button to start...</pre>
+  <pre id="output">Click the button to load tickers...</pre>
 
   <script>
     const priceCache = {};
     const DAYS = 7;
 
-    function connectWebSocket() {
+    // Your Google Sheet CSV link
+    const SHEET_URL = "https://docs.google.com/spreadsheets/d/1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw/gviz/tq?tqx=out:csv&gid=0";
+
+    async function fetchTickersFromSheet() {
+      const res = await fetch(SHEET_URL);
+      const text = await res.text();
+      const lines = text.trim().split("\n");
+      return lines.map(line => line.replace(/"/g, "").trim()); // remove quotes
+    }
+
+    function connectWebSocket(tickers) {
       const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
 
       ws.onopen = () => {
         console.log("WebSocket connected ✅");
-        ws.send(JSON.stringify({
-          op: "subscribe",
-          args: ["tickers.*"]   // subscribe to ALL linear tickers
-        }));
+        // Subscribe to tickers from sheet
+        const args = tickers.map(sym => `tickers.${sym}`);
+        console.log("Subscribing:", args);
+        ws.send(JSON.stringify({ op: "subscribe", args }));
       };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        // Debug: log the first few messages to console
-        console.log("Message:", msg);
 
-        // Process only ticker updates
         if (msg.topic && msg.topic.startsWith("tickers.") && msg.data) {
           const sym = msg.data.symbol;
           const lastPrice = parseFloat(msg.data.lastPrice);
@@ -37,14 +44,13 @@
           if (!priceCache[sym]) {
             priceCache[sym] = { current: lastPrice, history: [] };
           }
-
           priceCache[sym].current = lastPrice;
 
-          // Fake a 7-day old price for demo (otherwise need REST call)
+          // Fake 7-day-old price for demo
           if (priceCache[sym].history.length === 0) {
             priceCache[sym].history.push({
               timestamp: Date.now() - (DAYS * 24 * 60 * 60 * 1000),
-              price: lastPrice * 0.85   // pretend old price
+              price: lastPrice * 0.85
             });
           }
 
@@ -54,7 +60,7 @@
 
       ws.onclose = () => {
         console.log("WebSocket disconnected ❌ — retrying...");
-        setTimeout(connectWebSocket, 3000);
+        setTimeout(() => connectWebSocket(tickers), 3000);
       };
     }
 
@@ -70,12 +76,14 @@
         }
       }
 
-      // Show first 20 symbols
       document.getElementById("output").textContent =
-        JSON.stringify(out.slice(0, 20), null, 2);
+        JSON.stringify(out.slice(0, 20), null, 2); // show first 20
     }
 
-    document.getElementById("load").onclick = connectWebSocket;
+    document.getElementById("load").onclick = async () => {
+      const tickers = await fetchTickersFromSheet();
+      connectWebSocket(tickers);
+    };
   </script>
 </body>
 </html>
