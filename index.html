@@ -7,11 +7,10 @@
 <body>
   <h1>7-Day Price Change — Bybit Futures & Perpetuals (Live)</h1>
   <button id="load">Start Streaming</button>
-  <pre id="output"></pre>
+  <pre id="output">Click the button to start...</pre>
 
   <script>
-    // Store prices
-    const priceCache = {};   // { symbol: { current: 0, history: [] } }
+    const priceCache = {};
     const DAYS = 7;
 
     function connectWebSocket() {
@@ -19,34 +18,33 @@
 
       ws.onopen = () => {
         console.log("WebSocket connected ✅");
-        // Subscribe to ALL linear tickers (perpetual USDT contracts)
         ws.send(JSON.stringify({
           op: "subscribe",
-          args: ["tickers.*"]   // * = all tickers
+          args: ["tickers.*"]   // subscribe to ALL linear tickers
         }));
       };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+        // Debug: log the first few messages to console
+        console.log("Message:", msg);
 
-        // Only process ticker updates
-        if (msg.topic && msg.topic.startsWith("tickers.")) {
-          const sym = msg.topic.split(".")[1];
+        // Process only ticker updates
+        if (msg.topic && msg.topic.startsWith("tickers.") && msg.data) {
+          const sym = msg.data.symbol;
           const lastPrice = parseFloat(msg.data.lastPrice);
 
           if (!priceCache[sym]) {
             priceCache[sym] = { current: lastPrice, history: [] };
           }
 
-          // Update current price
           priceCache[sym].current = lastPrice;
 
-          // For demo, simulate "7-day history" by storing price snapshots
-          // In production, you'd store actual daily closes from DB
+          // Fake a 7-day old price for demo (otherwise need REST call)
           if (priceCache[sym].history.length === 0) {
             priceCache[sym].history.push({
               timestamp: Date.now() - (DAYS * 24 * 60 * 60 * 1000),
-              price: lastPrice * 0.85  // fake a 7d-old price for testing
+              price: lastPrice * 0.85   // pretend old price
             });
           }
 
@@ -72,8 +70,9 @@
         }
       }
 
+      // Show first 20 symbols
       document.getElementById("output").textContent =
-        JSON.stringify(out.slice(0, 20), null, 2); // show top 20
+        JSON.stringify(out.slice(0, 20), null, 2);
     }
 
     document.getElementById("load").onclick = connectWebSocket;
