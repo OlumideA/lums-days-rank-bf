@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Bybit 7-Day Crypto Change</title>
+</head>
+<body>
+  <h1>7-Day Price Change — Bybit Futures & Perpetuals</h1>
+  <button id="load">Load Data</button>
+  <pre id="output"></pre>
+
+  <script>
+    const API_BASE = 'https://api.bybit.com';
+
+    async function fetchTickers() {
+      const res = await fetch(`${API_BASE}/v2/public/tickers`);
+      const data = await res.json();
+      return data.result || data;  // check JSON structure
+    }
+
+    async function fetchKline(symbol) {
+      const now = Date.now();
+      const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+      const params = new URLSearchParams({
+        category: 'linear',   // or 'inverse' depending on contract type
+        symbol: symbol,
+        interval: 'D',        // Daily candles
+        startTime: sevenDaysAgo,
+        endTime: now,
+        limit: 2              // get at least the 7-day-ago plus latest
+      });
+      const res = await fetch(`${API_BASE}/v5/market/kline?${params}`);
+      const json = await res.json();
+      return json.result.list || [];
+    }
+
+    async function computeChanges() {
+      const tickers = await fetchTickers();
+      const out = [];
+
+      for (let t of tickers) {
+        const sym = t.symbol;
+        try {
+          const kline = await fetchKline(sym);
+          if (kline.length < 2) continue;
+          const oldest = parseFloat(kline[0][4]);  // close price 7d ago
+          const latest = parseFloat(t.lastPrice);
+          const pct = ((latest - oldest) / oldest * 100).toFixed(2);
+          out.push({ symbol: sym, change7d: pct + '%' });
+        } catch (e) {
+          console.warn(`Error for ${sym}:`, e);
+        }
+      }
+
+      document.getElementById('output').textContent = JSON.stringify(out, null, 2);
+    }
+
+    document.getElementById('load').onclick = computeChanges;
+  </script>
+</body>
+</html>
