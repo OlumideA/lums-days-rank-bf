@@ -1,99 +1,83 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bybit 7-Day Change</title>
+  <title>Bybit 7-Day Price Change Ranking</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background-color: #f4f4f4; }
+  </style>
 </head>
 <body>
-  <h1>7-Day Price Change — Bybit Futures</h1>
-  <button id="load">Start Streaming</button>
-  <pre id="output">Click the button to load tickers...</pre>
+  <h2>7-Day Price Change — Bybit Futures</h2>
+  <button id="loadBtn">Load & Calculate</button>
+  <table id="resultsTable"></table>
 
   <script>
-    const priceCache = {};
-    const DAYS = 7;
+    const SHEET_ID = "1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw";
+    const API_KEY = ""; // not needed for public sheets
+    const SHEET_RANGE = "A:A"; // only column A
 
-    // Google Sheet CSV link
-    const SHEET_URL = "https://docs.google.com/spreadsheets/d/1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw/gviz/tq?tqx=out:csv&gid=0";
-
-    async function fetchTickersFromSheet() {
-      const res = await fetch(SHEET_URL);
+    async function fetchSymbolsFromSheet() {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Sheet1&range=${SHEET_RANGE}`;
+      const res = await fetch(url);
       const text = await res.text();
-      const lines = text.trim().split("\n");
-
-      // skip header row and clean up
-      return lines.slice(1).map(line => {
-        const cols = line.split(",");
-        const raw = cols[0].replace(/"/g, "").trim(); // e.g. tickers.ETHUSDT
-        return raw.replace("tickers.", ""); // → ETHUSDT
-      });
+      const json = JSON.parse(text.substr(47).slice(0, -2)); // strip Google JSON wrapper
+      const symbols = json.table.rows.map(r => r.c[0]?.v).filter(Boolean);
+      return symbols;
     }
 
-    function connectWebSocket(tickers) {
-      const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
+    async function fetchPrice(symbol) {
+      const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=D&limit=7`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.result || !data.result.list || data.result.list.length < 2) return null;
 
-      ws.onopen = () => {
-        console.log("WebSocket connected ✅");
-        // Subscribe to tickers
-        const args = tickers.map(sym => `tickers.${sym}`);
-        console.log("Subscribing:", args);
-        ws.send(JSON.stringify({ op: "subscribe", args }));
-      };
+      const candles = data.result.list.reverse(); // oldest → newest
+      const oldPrice = parseFloat(candles[0][4]); // close 7 days ago
+      const newPrice = parseFloat(candles[candles.length - 1][4]); // latest close
+      const change = ((newPrice - oldPrice) / oldPrice * 100).toFixed(2);
 
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-
-        if (msg.topic && msg.topic.startsWith("tickers.") && msg.data) {
-          const sym = msg.data.symbol;
-          const lastPrice = parseFloat(msg.data.lastPrice);
-
-          if (!priceCache[sym]) {
-            priceCache[sym] = { current: lastPrice, history: [] };
-          }
-          priceCache[sym].current = lastPrice;
-
-          // Fake 7-day-old price for demo
-          if (priceCache[sym].history.length === 0) {
-            priceCache[sym].history.push({
-              timestamp: Date.now() - (DAYS * 24 * 60 * 60 * 1000),
-              price: lastPrice * 0.85
-            });
-          }
-
-          renderOutput();
-        }
-      };
-
-      ws.onclose = () => {
-        console.log("WebSocket disconnected ❌ — retrying...");
-        setTimeout(() => connectWebSocket(tickers), 3000);
-      };
+      return { symbol, current: newPrice, change7d: change };
     }
 
-    function renderOutput() {
-      const out = [];
+    async function loadData() {
+      document.getElementById("resultsTable").innerHTML = "<tr><td>Loading...</td></tr>";
+      const symbols = await fetchSymbolsFromSheet();
 
-      for (let sym in priceCache) {
-        const { current, history } = priceCache[sym];
-        if (history.length > 0) {
-          const oldPrice = history[0].price;
-          const pct = ((current - oldPrice) / oldPrice * 100).toFixed(2);
-          out.push({ symbol: sym, current, change7d: pct + "%" });
-        }
+      const results = [];
+      for (const sym of symbols) {
+        const row = await fetchPrice(sym);
+        if (row) results.push(row);
       }
 
-      // sort by change descending
-      out.sort((a, b) => parseFloat(b.change7d) - parseFloat(a.change7d));
+      // sort by % change descending
+      results.sort((a, b) => b.change7d - a.change7d);
 
-      document.getElementById("output").textContent =
-        JSON.stringify(out.slice(0, 20), null, 2); // show top 20
+      // build table
+      let html = `
+        <tr>
+          <th>Rank</th>
+          <th>Symbol</th>
+          <th>Current Price (USDT)</th>
+          <th>7D Change (%)</th>
+        </tr>`;
+      results.forEach((r, i) => {
+        html += `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${r.symbol}</td>
+            <td>${r.current}</td>
+            <td style="color:${r.change7d >= 0 ? 'green' : 'red'}">${r.change7d}%</td>
+          </tr>`;
+      });
+
+      document.getElementById("resultsTable").innerHTML = html;
     }
 
-    document.getElementById("load").onclick = async () => {
-      const tickers = await fetchTickersFromSheet();
-      console.log("Tickers from sheet:", tickers);
-      connectWebSocket(tickers);
-    };
+    document.getElementById("loadBtn").addEventListener("click", loadData);
   </script>
 </body>
 </html>
