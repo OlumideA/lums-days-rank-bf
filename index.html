@@ -19,7 +19,7 @@
     const SHEET_ID = "1TZb6a0bDNOM6Kbz4iWRo2bd9oEG6SVReylgOH0thAGw";
     const SHEET_RANGE = "A:A"; // only column A
 
-    // Fetch symbols from Google Sheets (CSV export)
+    // Fetch symbols from Google Sheet
     async function fetchSymbolsFromSheet() {
       try {
         const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Sheet1&range=${SHEET_RANGE}`;
@@ -27,7 +27,7 @@
         const text = await res.text();
         const symbols = text
           .split("\n")
-          .map(r => r.trim())
+          .map(r => r.trim().replace(/^"|"$/g, "")) // strip quotes
           .filter(Boolean);
         console.log("Symbols loaded:", symbols);
         return symbols;
@@ -46,34 +46,35 @@
         if (!data.result || !data.result.list || data.result.list.length < 2) return null;
 
         const candles = data.result.list.reverse(); // oldest → newest
-        const oldPrice = parseFloat(candles[0][4]);
-        const newPrice = parseFloat(candles[candles.length - 1][4]);
+        const oldPrice = parseFloat(candles[0][4]); // close 7 days ago
+        const newPrice = parseFloat(candles[candles.length - 1][4]); // latest close
         const change = ((newPrice - oldPrice) / oldPrice * 100).toFixed(2);
 
-        return { symbol, current: newPrice, change7d: parseFloat(change) };
+        return { symbol, current: newPrice, change7d: change };
       } catch (err) {
-        console.warn(`Failed to fetch ${symbol}:`, err);
+        console.warn(`Failed for ${symbol}:`, err);
         return null;
       }
     }
 
-    // Load data and render table
     async function loadData() {
       const table = document.getElementById("resultsTable");
       table.innerHTML = "<tr><td>Loading...</td></tr>";
 
       const symbols = await fetchSymbolsFromSheet();
-      const results = [];
-
-      for (const sym of symbols) {
-        const row = await fetchPrice(sym);
-        if (row) results.push(row);
+      if (!symbols.length) {
+        table.innerHTML = "<tr><td>No symbols found</td></tr>";
+        return;
       }
 
-      // sort by % change descending
-      results.sort((a, b) => b.change7d - a.change7d);
+      // Fetch all prices in parallel
+      const results = await Promise.all(symbols.map(s => fetchPrice(s)));
+      const filtered = results.filter(r => r !== null);
 
-      // build table
+      // Sort by 7-day change descending
+      filtered.sort((a, b) => b.change7d - a.change7d);
+
+      // Build table
       let html = `
         <tr>
           <th>Rank</th>
@@ -81,7 +82,7 @@
           <th>Current Price (USDT)</th>
           <th>7D Change (%)</th>
         </tr>`;
-      results.forEach((r, i) => {
+      filtered.forEach((r, i) => {
         html += `
           <tr>
             <td>${i + 1}</td>
