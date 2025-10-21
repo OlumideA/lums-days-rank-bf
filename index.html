@@ -71,8 +71,8 @@
       const results = await Promise.all(symbols.map(s => fetchPrice(s)));
       const filtered = results.filter(r => r !== null);
 
-      // Sort by 7-day change descending
-      filtered.sort((a, b) => b.change7d - a.change7d);
+      // Sort by 7-day change asc
+      filtered.sort((a, b) => a.change7d - b.change7d);
 
       // Build table
       let html = `
